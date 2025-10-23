@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"fmt"
 	"io/ioutil"
+	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -30,7 +31,18 @@ func NewGenerateCmd() *cobra.Command {
 func generateCollection(openapiFile, outDir string) error {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
-	doc, err := loader.LoadFromFile(openapiFile)
+	
+	// Load OpenAPI spec from file or URL
+	doc, err := func() (*openapi3.T, error) {
+		if strings.HasPrefix(openapiFile, "http://") || strings.HasPrefix(openapiFile, "https://") {
+			parsedURL, err := url.Parse(openapiFile)
+			if err != nil {
+				return nil, fmt.Errorf("invalid URL '%s': %w", openapiFile, err)
+			}
+			return loader.LoadFromURI(parsedURL)
+		}
+		return loader.LoadFromFile(openapiFile)
+	}()
 	if err != nil {
 		return fmt.Errorf("failed to load OpenAPI file: %w", err)
 	}
@@ -136,7 +148,7 @@ func generateCollection(openapiFile, outDir string) error {
 				for _, paramRef := range op.Parameters {
 					if paramRef.Value != nil && paramRef.Value.In == "header" {
 						paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
-						fmt.Fprintf(curl, " \\\n  -H '%s: ${%s}'", paramRef.Value.Name, paramName)
+						fmt.Fprintf(curl, " \\\n  -H \"%s: ${%s}\"", paramRef.Value.Name, paramName)
 					}
 				}
 			}
