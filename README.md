@@ -23,7 +23,7 @@ Transform your OpenAPI specs into ready-to-use curl scripts with environment sup
 
 ```bash
 # Using Go
-go install github.com/ErikVib/curly@latest
+go install github.com/ErikVib/curly@main
 
 # Or build from source
 git clone https://github.com/ErikVib/curly.git
