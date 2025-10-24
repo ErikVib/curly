@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os"
 
-	"curly/cmd"
+	"github.com/ErikVib/curly/cmd"
 )
 
 func main() {
