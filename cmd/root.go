@@ -99,6 +99,7 @@ func NewRootCmd() *cobra.Command {
 	var parallel int
 	var delay int
 	var verbose bool
+	var insecure bool
 
 	cmd := &cobra.Command{
 		Use:   "curly [collection-dir]",
@@ -126,9 +127,9 @@ func NewRootCmd() *cobra.Command {
 
 			cmdText, err := func() (string, error) {
 				if filePath != "" {
-					return runFile(filePath, dir, envName)
+					return runFile(filePath, dir, envName, insecure)
 				}
-				return launchCollection(dir, envName)
+				return launchCollection(dir, envName, insecure)
 			}()
 			if err != nil {
 				return err
@@ -143,11 +144,12 @@ func NewRootCmd() *cobra.Command {
 	cmd.Flags().IntVarP(&parallel, "parallel", "p", 1, "Number of concurrent executions per batch")
 	cmd.Flags().IntVar(&delay, "delay", 0, "Delay between batches in seconds")
 	cmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Show progress and detailed output")
+	cmd.Flags().BoolVarP(&insecure, "insecure", "k", false, "Skip SSL certificate verification (adds -k to ALL curls in the file)")
 
 	return cmd
 }
 
-func launchCollection(dir string, envName string) (string, error) {
+func launchCollection(dir string, envName string, insecure bool) (string, error) {
 	var envVars Environment
 	if envName != "" {
 		envsFile := filepath.Join(dir, "envs.yml")
@@ -197,15 +199,18 @@ func launchCollection(dir string, envName string) (string, error) {
 	}
 
 	contentStr := string(content)
+	if insecure {
+		contentStr = strings.ReplaceAll(contentStr, "curl ", "curl -k ")
+	}
 	if envName != "" {
 		contentStr = applyEnvironmentVars(contentStr, envVars)
-		tmpFile := selected + ".tmp"
-		if err := os.WriteFile(tmpFile, []byte(contentStr), 0644); err != nil {
-			return "", fmt.Errorf("failed to write temp file: %w", err)
-		}
-		selected = tmpFile
-		defer os.Remove(tmpFile)
 	}
+	tmpFile := selected + ".tmp"
+	if err := os.WriteFile(tmpFile, []byte(contentStr), 0644); err != nil {
+		return "", fmt.Errorf("failed to write temp file: %w", err)
+	}
+	selected = tmpFile
+	defer os.Remove(tmpFile)
 
 	editor := os.Getenv("EDITOR")
 	if editor == "" {
@@ -358,7 +363,7 @@ func execShellCommand(cmdText string) error {
 	return nil
 }
 
-func runFile(filePath, dir, envName string) (string, error) {
+func runFile(filePath, dir, envName string, insecure bool) (string, error) {
 	var envVars Environment
 	if envName != "" {
 		envsFile := filepath.Join(dir, "envs.yml")
@@ -382,6 +387,10 @@ func runFile(filePath, dir, envName string) (string, error) {
 	contentStr := string(content)
 	if envName != "" {
 		contentStr = applyEnvironmentVars(contentStr, envVars)
+	}
+
+	if insecure {
+		contentStr = strings.ReplaceAll(contentStr, "curl ", "curl -k ")
 	}
 
 	cmdText := extractShellCommand(contentStr)

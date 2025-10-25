@@ -15,6 +15,7 @@ Transform your OpenAPI specs into ready-to-use curl scripts with environment sup
 🔄 **Repeat & parallel execution** - Run requests multiple times for simple load testing or data seeding  
 📊 **Built-in statistics** - Track success/failure rates, response times, and throughput with verbose mode 
 ⚡ **Interactive mode** - Edit requests in your favorite editor before execution  
+🔒 **SSL flexibility** - Skip certificate verification with `-k` for development environments  
 🎯 **Simple & focused** - Tries to do one thing well, composes with other Unix tools
 
 ## Quick Start
@@ -50,6 +51,9 @@ curly -f collection/GET_users.curl
 curly -e dev 
 # or
 curly -e dev -f collection/GET_users.curl
+
+# Skip SSL certificate verification (useful for dev/self-signed certs)
+curly -k -f collection/GET_users.curl
 ```
 
 ## Usage
@@ -96,6 +100,8 @@ This will:
 2. Open it in your `$EDITOR` (defaults to `vim`)
 3. Execute the curl command when you save and [quit](https://stackoverflow.com/questions/11828270/how-do-i-exit-vim)
 
+**Note:** Interactive mode always opens a temporary copy of the file with environment variables and flags (like `-k`) already applied. Your edits are not saved back to the original `.curl` file.
+
 ### Direct Execution
 
 Run a specific file without opening the editor:
@@ -103,6 +109,10 @@ Run a specific file without opening the editor:
 ```bash
 curly -f collection/GET_users.curl
 curly -e dev -f collection/POST_users.curl
+
+# Skip SSL verification for self-signed certificates
+curly -k -f collection/GET_users.curl
+curly -k -e dev -f collection/POST_users.curl
 ```
 
 ### Repeat & Parallel Execution
@@ -197,6 +207,7 @@ Launch interactive mode to select and run a request.
 **Flags:**
 - `-e, --env <name>` - Environment to use from `envs.yml`
 - `-f, --file <path>` - Run specific file without editor
+- `-k, --insecure` - Skip SSL certificate verification (adds `-k` to ALL curls)
 - `-n, --times <N>` - Number of times to execute (default: 1)
 - `-p, --parallel <N>` - Number of concurrent executions (default: 1)
 - `--delay <seconds>` - Delay between batches in seconds
@@ -207,6 +218,7 @@ Launch interactive mode to select and run a request.
 curly
 curly collection/
 curly -e dev
+curly -k -f api.curl
 curly -f api.curl -n 100 -p 10 -v
 ```
 
@@ -239,6 +251,9 @@ curly
 
 # Test with different environments
 curly -e staging -f collection/GET_status.curl
+
+# Test against dev environments with self-signed certificates
+curly -k -f collection/GET_status.curl
 ```
 
 ### Load Testing
