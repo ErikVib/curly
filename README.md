@@ -306,7 +306,7 @@ Each execution gets fresh values - perfect for load testing or generating test u
 
 ## Requirements
 
-- Go 1.20+ (for building from source)
+- Go 1.22+ (for building from source)
 - `fzf` (optional, for fuzzy finding)
 - An editor set in `$EDITOR` (defaults to `vim`)
 
