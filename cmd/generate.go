@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -33,7 +32,7 @@ func NewGenerateCmd() *cobra.Command {
 func generateCollection(openapiFile, outDir string) error {
 	loader := openapi3.NewLoader()
 	loader.IsExternalRefsAllowed = true
-	
+
 	// Load OpenAPI spec from file or URL
 	doc, err := func() (*openapi3.T, error) {
 		if strings.HasPrefix(openapiFile, "http://") || strings.HasPrefix(openapiFile, "https://") {
@@ -60,7 +59,7 @@ func generateCollection(openapiFile, outDir string) error {
 
 	write := func(name, contents string) error {
 		path := filepath.Join(outDir, name)
-		return ioutil.WriteFile(path, []byte(contents), 0644)
+		return os.WriteFile(path, []byte(contents), 0644)
 	}
 
 	sanitize := func(s string) string {
@@ -98,8 +97,8 @@ func generateCollection(openapiFile, outDir string) error {
 			queryParams := []string{}
 			headerParams := []string{}
 			formDataParams := []string{}
-			bodyVars := map[string]interface{}{}
-			
+			bodyVars := map[string]any{}
+
 			// Extract query parameters
 			if op.Parameters != nil {
 				for _, paramRef := range op.Parameters {
@@ -109,7 +108,7 @@ func generateCollection(openapiFile, outDir string) error {
 					}
 				}
 			}
-			
+
 			// Extract header parameters
 			if op.Parameters != nil {
 				for _, paramRef := range op.Parameters {
@@ -119,7 +118,7 @@ func generateCollection(openapiFile, outDir string) error {
 					}
 				}
 			}
-			
+
 			// Extract formData parameters
 			if op.Parameters != nil {
 				for _, paramRef := range op.Parameters {
@@ -129,11 +128,11 @@ func generateCollection(openapiFile, outDir string) error {
 					}
 				}
 			}
-			
+
 			// Extract body variables from request body example
 			var exampleBody string
 			var contentType string
-			
+
 			// OpenAPI 3.0 style (requestBody)
 			if op.RequestBody != nil && op.RequestBody.Value != nil {
 				for ct, mediaType := range op.RequestBody.Value.Content {
@@ -144,7 +143,7 @@ func generateCollection(openapiFile, outDir string) error {
 						// Format the example with variables
 						exampleBody = formatExampleWithVars(mediaType.Example, contentType)
 						break
-					} else if mediaType.Examples != nil && len(mediaType.Examples) > 0 {
+					} else if len(mediaType.Examples) > 0 {
 						// Use first example
 						for _, exampleRef := range mediaType.Examples {
 							if exampleRef.Value != nil && exampleRef.Value.Value != nil {
@@ -166,14 +165,14 @@ func generateCollection(openapiFile, outDir string) error {
 					}
 				}
 			}
-			
+
 			// Swagger 2.0 style (parameters with in: "body")
 			if exampleBody == "" && op.Parameters != nil {
 				for _, paramRef := range op.Parameters {
 					if paramRef.Value != nil && paramRef.Value.In == "body" && paramRef.Value.Schema != nil {
 						contentType = "application/json" // Default for Swagger 2.0
 						schema := paramRef.Value.Schema.Value
-						
+
 						// Try to generate example from schema
 						schemaExample := generateExampleFromSchema(schema, doc)
 						if schemaExample != nil {
@@ -212,7 +211,7 @@ func generateCollection(openapiFile, outDir string) error {
 					fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
 				}
 			}
-			
+
 			// Form Data section
 			if len(formDataParams) > 0 {
 				fmt.Fprintf(curl, "\n# Form Data\n")
@@ -230,7 +229,7 @@ func generateCollection(openapiFile, outDir string) error {
 					keys = append(keys, k)
 				}
 				sort.Strings(keys)
-				
+
 				for _, key := range keys {
 					value := bodyVars[key]
 					fmt.Fprintf(curl, "%s=%s\n", strings.ToUpper(key), formatVariableValue(value))
@@ -266,7 +265,7 @@ func generateCollection(openapiFile, outDir string) error {
 				fmt.Fprintf(curl, " \\\n  -H \"Content-Type: %s\"", contentType)
 			}
 			fmt.Fprintf(curl, " \\\n  -H \"Accept: application/json\"")
-			
+
 			if op.Parameters != nil {
 				for _, paramRef := range op.Parameters {
 					if paramRef.Value != nil && paramRef.Value.In == "header" {
@@ -357,11 +356,11 @@ func extractPathParams(path string) []string {
 }
 
 // extractBodyVariables extracts top-level fields from example body as variables
-func extractBodyVariables(example interface{}, prefix string) map[string]interface{} {
-	vars := make(map[string]interface{})
-	
+func extractBodyVariables(example any, prefix string) map[string]any {
+	vars := make(map[string]any)
+
 	switch v := example.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		for key, value := range v {
 			varName := key
 			if prefix != "" {
@@ -371,7 +370,7 @@ func extractBodyVariables(example interface{}, prefix string) map[string]interfa
 			switch value.(type) {
 			case string, int, int64, float64, bool, nil:
 				vars[varName] = value
-			case map[string]interface{}, []interface{}:
+			case map[string]any, []any:
 				// Don't extract nested objects/arrays - keep them inline
 				continue
 			default:
@@ -380,29 +379,29 @@ func extractBodyVariables(example interface{}, prefix string) map[string]interfa
 			}
 		}
 	}
-	
+
 	return vars
 }
 
 // extractBodyVariablesFromAny extracts variables from any type (object or array)
-func extractBodyVariablesFromAny(example interface{}) map[string]interface{} {
+func extractBodyVariablesFromAny(example any) map[string]any {
 	switch v := example.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		// Object - extract top-level fields
 		return extractBodyVariables(v, "")
-	case []interface{}:
+	case []any:
 		// Array - extract from first item if it's an object
 		if len(v) > 0 {
-			if obj, ok := v[0].(map[string]interface{}); ok {
+			if obj, ok := v[0].(map[string]any); ok {
 				return extractBodyVariables(obj, "")
 			}
 		}
 	}
-	return make(map[string]interface{})
+	return make(map[string]any)
 }
 
 // formatVariableValue formats a value for variable assignment
-func formatVariableValue(value interface{}) string {
+func formatVariableValue(value any) string {
 	switch v := value.(type) {
 	case string:
 		return fmt.Sprintf("\"%s\"", v)
@@ -422,12 +421,12 @@ func formatVariableValue(value interface{}) string {
 }
 
 // formatExampleWithVars formats an example body with variable substitutions
-func formatExampleWithVars(example interface{}, contentType string) string {
+func formatExampleWithVars(example any, contentType string) string {
 	// Handle arrays
-	if arr, ok := example.([]interface{}); ok {
+	if arr, ok := example.([]any); ok {
 		if len(arr) > 0 {
 			// Format array with first item using variables if it's an object
-			if obj, ok := arr[0].(map[string]interface{}); ok {
+			if obj, ok := arr[0].(map[string]any); ok {
 				formattedItem := formatJSONWithVars(obj)
 				return fmt.Sprintf("[\n%s\n]", indentString(formattedItem, "  "))
 			}
@@ -436,12 +435,12 @@ func formatExampleWithVars(example interface{}, contentType string) string {
 		data, _ := json.MarshalIndent(arr, "", "  ")
 		return string(data)
 	}
-	
+
 	// Handle maps/objects with variable substitution
-	if _, ok := example.(map[string]interface{}); ok {
+	if _, ok := example.(map[string]any); ok {
 		return formatJSONWithVars(example)
 	}
-	
+
 	// For other types, marshal as JSON
 	data, err := json.MarshalIndent(example, "", "  ")
 	if err != nil {
@@ -462,22 +461,22 @@ func indentString(s string, indent string) string {
 }
 
 // formatJSONWithVars formats JSON with variables substituted
-func formatJSONWithVars(example interface{}) string {
+func formatJSONWithVars(example any) string {
 	switch v := example.(type) {
-	case map[string]interface{}:
+	case map[string]any:
 		var buf bytes.Buffer
 		buf.WriteString("{\n")
-		
+
 		keys := make([]string, 0, len(v))
 		for k := range v {
 			keys = append(keys, k)
 		}
 		sort.Strings(keys)
-		
+
 		for i, key := range keys {
 			value := v[key]
 			buf.WriteString(fmt.Sprintf("  \"%s\": ", key))
-			
+
 			// Format value with variable substitution
 			switch val := value.(type) {
 			case string:
@@ -490,78 +489,78 @@ func formatJSONWithVars(example interface{}) string {
 				buf.WriteString(fmt.Sprintf("${%s}", strings.ToUpper(key)))
 			case int, int64:
 				buf.WriteString(fmt.Sprintf("${%s}", strings.ToUpper(key)))
-			case map[string]interface{}:
+			case map[string]any:
 				// Nested object - format inline without variables
 				nested, _ := json.MarshalIndent(val, "  ", "  ")
 				buf.WriteString(string(nested))
-			case []interface{}:
+			case []any:
 				// Array - format inline without variables
 				arr, _ := json.MarshalIndent(val, "  ", "  ")
 				buf.WriteString(string(arr))
 			default:
 				buf.WriteString(fmt.Sprintf("\"%v\"", val))
 			}
-			
+
 			if i < len(keys)-1 {
 				buf.WriteString(",")
 			}
 			buf.WriteString("\n")
 		}
-		
+
 		buf.WriteString("}")
 		return buf.String()
-		
-	case []interface{}:
+
+	case []any:
 		// Array at root - just marshal it
 		data, _ := json.MarshalIndent(v, "", "  ")
 		return string(data)
-		
+
 	default:
 		return "{}"
 	}
 }
 
 // generateExampleFromSchema generates an example object from an OpenAPI schema
-func generateExampleFromSchema(schema *openapi3.Schema, doc *openapi3.T) interface{} {
+func generateExampleFromSchema(schema *openapi3.Schema, doc *openapi3.T) any {
 	if schema == nil {
 		return nil
 	}
-	
+
 	// Handle array schemas
 	if schema.Type != nil && schema.Type.Is("array") {
 		// Generate one example item
 		if schema.Items != nil && schema.Items.Value != nil {
 			item := generateExampleFromSchema(schema.Items.Value, doc)
 			if item != nil {
-				return []interface{}{item}
+				return []any{item}
 			}
 		}
-		return []interface{}{}
+		return []any{}
 	}
-	
+
 	// Handle object schemas
 	if schema.Type != nil && schema.Type.Is("object") {
-		example := make(map[string]interface{})
-		
+		example := make(map[string]any)
+
 		// If no properties defined but it's an object, return empty example
 		// This will trigger the fallback {"foo": "bar"}
 		if len(schema.Properties) == 0 {
 			return nil
 		}
-		
+
 		for propName, propSchemaRef := range schema.Properties {
 			if propSchemaRef == nil || propSchemaRef.Value == nil {
 				continue
 			}
-			
+
 			propSchema := propSchemaRef.Value
-			
+
 			// Use example if provided
 			if propSchema.Example != nil {
 				example[propName] = propSchema.Example
 				continue
 			}
-			
+
 			// Generate based on type
 			if propSchema.Type != nil {
 				if propSchema.Type.Is("string") {
@@ -589,26 +588,26 @@ func generateExampleFromSchema(schema *openapi3.Schema, doc *openapi3.T) interfa
 					if arrayExample := generateExampleFromSchema(propSchema, doc); arrayExample != nil {
 						example[propName] = arrayExample
 					} else {
-						example[propName] = []interface{}{}
+						example[propName] = []any{}
 					}
 				} else if propSchema.Type.Is("object") {
 					// Recursively generate nested object
 					if nested := generateExampleFromSchema(propSchema, doc); nested != nil {
 						example[propName] = nested
 					} else {
-						example[propName] = map[string]interface{}{}
+						example[propName] = map[string]any{}
 					}
 				}
 			}
 		}
-		
+
 		if len(example) == 0 {
 			return nil
 		}
-		
+
 		return example
 	}
-	
+
 	// Handle primitive types at root level
 	if schema.Type != nil {
 		if schema.Type.Is("string") {
@@ -636,6 +635,6 @@ func generateExampleFromSchema(schema *openapi3.Schema, doc *openapi3.T) interfa
 			return true
 		}
 	}
-	
+
 	return nil
 }

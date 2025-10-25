@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"io/ioutil"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -192,7 +191,7 @@ func launchCollection(dir string, envName string) (string, error) {
 		return "", nil
 	}
 
-	content, err := ioutil.ReadFile(selected)
+	content, err := os.ReadFile(selected)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
@@ -201,7 +200,7 @@ func launchCollection(dir string, envName string) (string, error) {
 	if envName != "" {
 		contentStr = applyEnvironmentVars(contentStr, envVars)
 		tmpFile := selected + ".tmp"
-		if err := ioutil.WriteFile(tmpFile, []byte(contentStr), 0644); err != nil {
+		if err := os.WriteFile(tmpFile, []byte(contentStr), 0644); err != nil {
 			return "", fmt.Errorf("failed to write temp file: %w", err)
 		}
 		selected = tmpFile
@@ -221,7 +220,7 @@ func launchCollection(dir string, envName string) (string, error) {
 		return "", fmt.Errorf("editor failed: %w", err)
 	}
 
-	content, err = ioutil.ReadFile(selected)
+	content, err = os.ReadFile(selected)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file after editing: %w", err)
 	}
@@ -270,7 +269,7 @@ func execCmd(cmdText string, times int, parallel int, delay int, verbose bool) e
 	remaining := times
 	completed := 0
 
-	for batchNum := 0; batchNum < batches; batchNum++ {
+	for batchNum := range batches {
 		// Check for cancellation
 		select {
 		case <-ctx.Done():
@@ -375,7 +374,7 @@ func runFile(filePath, dir, envName string) (string, error) {
 		envVars = env
 	}
 
-	content, err := ioutil.ReadFile(filePath)
+	content, err := os.ReadFile(filePath)
 	if err != nil {
 		return "", fmt.Errorf("failed to read file: %w", err)
 	}
@@ -394,7 +393,7 @@ func runFile(filePath, dir, envName string) (string, error) {
 }
 
 func loadEnvConfig(filename string) (*EnvConfig, error) {
-	data, err := ioutil.ReadFile(filename)
+	data, err := os.ReadFile(filename)
 	if err != nil {
 		return nil, err
 	}
