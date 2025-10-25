@@ -97,6 +97,7 @@ func generateCollection(openapiFile, outDir string) error {
 			pathParams := extractPathParams(path)
 			queryParams := []string{}
 			headerParams := []string{}
+			formDataParams := []string{}
 			bodyVars := map[string]interface{}{}
 			
 			// Extract query parameters
@@ -115,6 +116,16 @@ func generateCollection(openapiFile, outDir string) error {
 					if paramRef.Value != nil && paramRef.Value.In == "header" {
 						paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
 						headerParams = append(headerParams, paramName)
+					}
+				}
+			}
+			
+			// Extract formData parameters
+			if op.Parameters != nil {
+				for _, paramRef := range op.Parameters {
+					if paramRef.Value != nil && paramRef.Value.In == "formData" {
+						paramName := strings.ToUpper(paramRef.Value.Name)
+						formDataParams = append(formDataParams, paramName)
 					}
 				}
 			}
@@ -201,6 +212,14 @@ func generateCollection(openapiFile, outDir string) error {
 					fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
 				}
 			}
+			
+			// Form Data section
+			if len(formDataParams) > 0 {
+				fmt.Fprintf(curl, "\n# Form Data\n")
+				for _, paramName := range formDataParams {
+					fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
+				}
+			}
 
 			// Body section
 			if len(bodyVars) > 0 {
@@ -257,11 +276,37 @@ func generateCollection(openapiFile, outDir string) error {
 				}
 			}
 
-			// Add request body
-			if exampleBody != "" {
+			// Add form data parameters
+			if len(formDataParams) > 0 {
+				for _, paramName := range formDataParams {
+					// Get original parameter name (lowercase)
+					var originalName string
+					if op.Parameters != nil {
+						for _, paramRef := range op.Parameters {
+							if paramRef.Value != nil && paramRef.Value.In == "formData" {
+								if strings.ToUpper(paramRef.Value.Name) == paramName {
+									originalName = paramRef.Value.Name
+									break
+								}
+							}
+						}
+					}
+					// Add form field
+					// Heuristic: if name contains "file" or "image", treat as file upload
+					if originalName != "" {
+						lowerName := strings.ToLower(originalName)
+						if strings.Contains(lowerName, "file") || strings.Contains(lowerName, "image") || strings.Contains(lowerName, "attachment") {
+							fmt.Fprintf(curl, " \\\n  -F \"%s=@${%s}\"", originalName, paramName)
+						} else {
+							fmt.Fprintf(curl, " \\\n  -F \"%s=${%s}\"", originalName, paramName)
+						}
+					}
+				}
+			} else if exampleBody != "" {
+				// Add request body (only if no form data)
 				fmt.Fprintf(curl, " \\\n  --data-binary @- << EOF\n%s\nEOF", exampleBody)
 			} else if op.RequestBody != nil {
-				// Fallback to simple placeholder
+				// Fallback to simple placeholder (only if no form data)
 				fmt.Fprintf(curl, " \\\n  -d '{\"foo\": \"bar\"}'")
 			}
 
