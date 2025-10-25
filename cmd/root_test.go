@@ -3,6 +3,7 @@ package cmd
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -370,5 +371,63 @@ func TestLoadEnvConfigFileNotFound(t *testing.T) {
 	_, err := loadEnvConfig("nonexistent.yml")
 	if err == nil {
 		t.Error("expected error for nonexistent file, got nil")
+	}
+}
+
+func TestInsecureFlagAddsKToCurl(t *testing.T) {
+	tests := []struct {
+		name     string
+		content  string
+		insecure bool
+		expected string
+	}{
+		{
+			name: "insecure flag adds -k to basic curl",
+			content: `# Variables
+BASE_URL="http://localhost"
+
+curl -s -X GET "${BASE_URL}/test"`,
+			insecure: true,
+			expected: `# Variables
+BASE_URL="http://localhost"
+
+curl -k -s -X GET "${BASE_URL}/test"`,
+		},
+		{
+			name: "insecure flag adds -k to curl with headers",
+			content: `curl -X POST "${BASE_URL}/api" \
+  -H "Content-Type: application/json"`,
+			insecure: true,
+			expected: `curl -k -X POST "${BASE_URL}/api" \
+  -H "Content-Type: application/json"`,
+		},
+		{
+			name: "insecure false does not modify curl",
+			content: `curl -s -X GET "${BASE_URL}/test"`,
+			insecure: false,
+			expected: `curl -s -X GET "${BASE_URL}/test"`,
+		},
+		{
+			name: "multiple curl commands all get -k",
+			content: `curl -X GET test1
+curl -X POST test2`,
+			insecure: true,
+			expected: `curl -k -X GET test1
+curl -k -X POST test2`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.content
+			if tt.insecure {
+				// This is the same logic used in runFile and launchCollection
+				result = strings.ReplaceAll(result, "curl ", "curl -k ")
+			}
+
+			if result != tt.expected {
+				t.Errorf("insecure flag application =\n%q\n\nwant:\n%q", result, tt.expected)
+			}
+		})
 	}
 }

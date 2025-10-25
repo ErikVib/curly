@@ -214,3 +214,102 @@ curl -s -X GET "${BASE_URL}/test" -H "Authorization: ${TOKEN}"
 		t.Error("curl command was modified")
 	}
 }
+
+func TestRunFileWithInsecureFlag(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create a curl file
+	curlFile := filepath.Join(tmpDir, "test.curl")
+	curlContent := `# GET /test
+
+# Variables
+BASE_URL="https://localhost:8443"
+
+curl -s -X GET "${BASE_URL}/test"
+`
+
+	if err := os.WriteFile(curlFile, []byte(curlContent), 0644); err != nil {
+		t.Fatalf("failed to create test curl file: %v", err)
+	}
+
+	// Test without insecure flag
+	cmdText, err := runFile(curlFile, tmpDir, "", false)
+	if err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+
+	if !strings.Contains(cmdText, "curl -s -X GET") {
+		t.Error("expected standard curl command without -k flag")
+	}
+	if strings.Contains(cmdText, "curl -k") {
+		t.Error("unexpected -k flag in command")
+	}
+
+	// Test with insecure flag
+	cmdTextInsecure, err := runFile(curlFile, tmpDir, "", true)
+	if err != nil {
+		t.Fatalf("runFile with insecure failed: %v", err)
+	}
+
+	if !strings.Contains(cmdTextInsecure, "curl -k -s -X GET") {
+		t.Errorf("expected curl with -k flag, got: %s", cmdTextInsecure)
+	}
+}
+
+func TestRunFileWithInsecureAndEnv(t *testing.T) {
+	if testing.Short() {
+		t.Skip("skipping integration test in short mode")
+	}
+
+	tmpDir := t.TempDir()
+
+	// Create a curl file
+	curlFile := filepath.Join(tmpDir, "test.curl")
+	curlContent := `# GET /test
+
+# Variables
+BASE_URL="https://localhost"
+TOKEN="default"
+
+curl -s -X GET "${BASE_URL}/test" -H "Authorization: ${TOKEN}"
+`
+
+	if err := os.WriteFile(curlFile, []byte(curlContent), 0644); err != nil {
+		t.Fatalf("failed to create test curl file: %v", err)
+	}
+
+	// Create envs.yml
+	envsFile := filepath.Join(tmpDir, "envs.yml")
+	envsContent := `environments:
+  dev:
+    BASE_URL: "https://dev.example.com"
+    TOKEN: "dev-token"
+`
+
+	if err := os.WriteFile(envsFile, []byte(envsContent), 0644); err != nil {
+		t.Fatalf("failed to create envs.yml: %v", err)
+	}
+
+	// Test with both env and insecure flag
+	cmdText, err := runFile(curlFile, tmpDir, "dev", true)
+	if err != nil {
+		t.Fatalf("runFile failed: %v", err)
+	}
+
+	// Should have -k flag
+	if !strings.Contains(cmdText, "curl -k") {
+		t.Error("expected -k flag in curl command")
+	}
+
+	// Should have env vars applied
+	if !strings.Contains(cmdText, `BASE_URL="https://dev.example.com"`) {
+		t.Error("BASE_URL was not replaced with env value")
+	}
+	if !strings.Contains(cmdText, `TOKEN="dev-token"`) {
+		t.Error("TOKEN was not replaced with env value")
+	}
+}
