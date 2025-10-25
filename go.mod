@@ -1,6 +1,6 @@
 module github.com/ErikVib/curly
 
-go 1.23.3
+go 1.23
 
 require (
 	github.com/getkin/kin-openapi v0.133.0
