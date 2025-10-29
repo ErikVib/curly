@@ -15,6 +15,20 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type parameterSet struct {
+	pathParams     []string
+	queryParams    []string
+	headerParams   []string
+	formDataParams []string
+	bodyVars       map[string]any
+}
+
+type requestBodyInfo struct {
+	exampleBody string
+	contentType string
+	bodyVars    map[string]any
+}
+
 func NewGenerateCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "generate <openapi-file>",
@@ -92,235 +106,37 @@ func generateCollection(openapiFile, outDir string) error {
 			}
 			fmt.Fprintf(curl, "\n# Variables\n")
 
-			// Collect variables by category
-			pathParams := extractPathParams(path)
-			queryParams := []string{}
-			headerParams := []string{}
-			formDataParams := []string{}
-			bodyVars := map[string]any{}
+			params := extractRequestParameters(path, op, doc)
+			bodyInfo := extractRequestBody(op, doc)
 
-			// Extract query parameters
-			if op.Parameters != nil {
-				for _, paramRef := range op.Parameters {
-					if paramRef.Value != nil && paramRef.Value.In == "query" {
-						paramName := strings.ToUpper(paramRef.Value.Name)
-						queryParams = append(queryParams, paramName)
-					}
-				}
-			}
-
-			// Extract header parameters
-			if op.Parameters != nil {
-				for _, paramRef := range op.Parameters {
-					if paramRef.Value != nil && paramRef.Value.In == "header" {
-						paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
-						headerParams = append(headerParams, paramName)
-					}
-				}
-			}
-
-			// Extract formData parameters
-			if op.Parameters != nil {
-				for _, paramRef := range op.Parameters {
-					if paramRef.Value != nil && paramRef.Value.In == "formData" {
-						paramName := strings.ToUpper(paramRef.Value.Name)
-						formDataParams = append(formDataParams, paramName)
-					}
-				}
-			}
-
-			// Extract body variables from request body example
-			var exampleBody string
-			var contentType string
-
-			// OpenAPI 3.0 style (requestBody)
-			if op.RequestBody != nil && op.RequestBody.Value != nil {
-				for ct, mediaType := range op.RequestBody.Value.Content {
-					contentType = ct
-					if mediaType.Example != nil {
-						// Extract variables from example
-						bodyVars = extractBodyVariables(mediaType.Example, "")
-						// Format the example with variables
-						exampleBody = formatExampleWithVars(mediaType.Example, contentType)
-						break
-					} else if len(mediaType.Examples) > 0 {
-						// Use first example
-						for _, exampleRef := range mediaType.Examples {
-							if exampleRef.Value != nil && exampleRef.Value.Value != nil {
-								bodyVars = extractBodyVariables(exampleRef.Value.Value, "")
-								exampleBody = formatExampleWithVars(exampleRef.Value.Value, contentType)
-								break
-							}
-						}
-						break
-					} else if mediaType.Schema != nil {
-						// Generate example from schema
-						schemaExample := generateExampleFromSchema(mediaType.Schema.Value, doc)
-						if schemaExample != nil {
-							// Extract variables (handle both objects and arrays)
-							bodyVars = extractBodyVariablesFromAny(schemaExample)
-							exampleBody = formatExampleWithVars(schemaExample, contentType)
-							break
-						}
-					}
-				}
-			}
-
-			// Swagger 2.0 style (parameters with in: "body")
-			if exampleBody == "" && op.Parameters != nil {
-				for _, paramRef := range op.Parameters {
-					if paramRef.Value != nil && paramRef.Value.In == "body" && paramRef.Value.Schema != nil {
-						contentType = "application/json" // Default for Swagger 2.0
-						schema := paramRef.Value.Schema.Value
-
-						// Try to generate example from schema
-						schemaExample := generateExampleFromSchema(schema, doc)
-						if schemaExample != nil {
-							// Extract variables (handle both objects and arrays)
-							bodyVars = extractBodyVariablesFromAny(schemaExample)
-							exampleBody = formatExampleWithVars(schemaExample, contentType)
-							break
-						}
-					}
-				}
-			}
-
-			// Always include BASE_URL first
 			fmt.Fprintf(curl, "\nBASE_URL=\"%s\"\n", baseURL)
-
-			// Path Parameters section
-			if len(pathParams) > 0 {
-				fmt.Fprintf(curl, "\n# Path Parameters\n")
-				for _, param := range pathParams {
-					fmt.Fprintf(curl, "%s=\"VALUE\"\n", strings.ToUpper(param))
-				}
-			}
-
-			// Query Parameters section
-			if len(queryParams) > 0 {
-				fmt.Fprintf(curl, "\n# Query Parameters\n")
-				for _, paramName := range queryParams {
-					fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
-				}
-			}
-
-			// Headers section
-			if len(headerParams) > 0 {
-				fmt.Fprintf(curl, "\n# Headers\n")
-				for _, paramName := range headerParams {
-					fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
-				}
-			}
-
-			// Form Data section
-			if len(formDataParams) > 0 {
-				fmt.Fprintf(curl, "\n# Form Data\n")
-				for _, paramName := range formDataParams {
-					fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
-				}
-			}
-
-			// Body section
-			if len(bodyVars) > 0 {
-				fmt.Fprintf(curl, "\n# Body\n")
-				// Sort keys for consistent output
-				keys := make([]string, 0, len(bodyVars))
-				for k := range bodyVars {
-					keys = append(keys, k)
-				}
-				sort.Strings(keys)
-
-				for _, key := range keys {
-					value := bodyVars[key]
-					fmt.Fprintf(curl, "%s=%s\n", strings.ToUpper(key), formatVariableValue(value))
-				}
-			}
-
-			// Build curl command
-			urlPath := path
-			for _, param := range pathParams {
-				urlPath = strings.ReplaceAll(urlPath, "{"+param+"}", "${"+strings.ToUpper(param)+"}")
-			}
-
-			fmt.Fprintf(curl, "\ncurl -s -X %s \"${BASE_URL}%s", strings.ToUpper(method), urlPath)
-
-			// Add query parameters
-			if op.Parameters != nil {
-				queryStrs := []string{}
-				for _, paramRef := range op.Parameters {
-					if paramRef.Value != nil && paramRef.Value.In == "query" {
-						paramName := strings.ToUpper(paramRef.Value.Name)
-						queryStrs = append(queryStrs, fmt.Sprintf("%s=${%s}", paramRef.Value.Name, paramName))
-					}
-				}
-				if len(queryStrs) > 0 {
-					fmt.Fprintf(curl, "?%s", strings.Join(queryStrs, "&"))
-				}
-			}
-
-			fmt.Fprintf(curl, "\"")
-
-			// Add headers
-			if contentType != "" {
-				fmt.Fprintf(curl, " \\\n  -H \"Content-Type: %s\"", contentType)
-			}
-			fmt.Fprintf(curl, " \\\n  -H \"Accept: application/json\"")
-
-			if op.Parameters != nil {
-				for _, paramRef := range op.Parameters {
-					if paramRef.Value != nil && paramRef.Value.In == "header" {
-						paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
-						fmt.Fprintf(curl, " \\\n  -H \"%s: ${%s}\"", paramRef.Value.Name, paramName)
-					}
-				}
-			}
-
-			// Add form data parameters
-			if len(formDataParams) > 0 {
-				for _, paramName := range formDataParams {
-					// Get original parameter name (lowercase)
-					var originalName string
-					if op.Parameters != nil {
-						for _, paramRef := range op.Parameters {
-							if paramRef.Value != nil && paramRef.Value.In == "formData" {
-								if strings.ToUpper(paramRef.Value.Name) == paramName {
-									originalName = paramRef.Value.Name
-									break
-								}
-							}
-						}
-					}
-					// Add form field
-					// Heuristic: if name contains "file" or "image", treat as file upload
-					if originalName != "" {
-						lowerName := strings.ToLower(originalName)
-						if strings.Contains(lowerName, "file") || strings.Contains(lowerName, "image") || strings.Contains(lowerName, "attachment") {
-							fmt.Fprintf(curl, " \\\n  -F \"%s=@${%s}\"", originalName, paramName)
-						} else {
-							fmt.Fprintf(curl, " \\\n  -F \"%s=${%s}\"", originalName, paramName)
-						}
-					}
-				}
-			} else if exampleBody != "" {
-				// Add request body (only if no form data)
-				fmt.Fprintf(curl, " \\\n  --data-binary @- << EOF\n%s\nEOF", exampleBody)
-			} else if op.RequestBody != nil {
-				// Fallback to simple placeholder (only if no form data)
-				fmt.Fprintf(curl, " \\\n  -d '{\"foo\": \"bar\"}'")
-			}
-
-			fmt.Fprintf(curl, "\n")
+			writeVariableSections(curl, params, bodyInfo)
+			buildCurlCommand(curl, method, path, params.pathParams, op, params.formDataParams, bodyInfo)
 
 			return write(fileName, curl.String())
 		}
 
-		_ = maybeMake("GET", item.Get)
-		_ = maybeMake("POST", item.Post)
-		_ = maybeMake("PUT", item.Put)
-		_ = maybeMake("PATCH", item.Patch)
-		_ = maybeMake("DELETE", item.Delete)
-		_ = maybeMake("OPTIONS", item.Options)
-		_ = maybeMake("HEAD", item.Head)
+		if err := maybeMake("GET", item.Get); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate GET %s: %v\n", path, err)
+		}
+		if err := maybeMake("POST", item.Post); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate POST %s: %v\n", path, err)
+		}
+		if err := maybeMake("PUT", item.Put); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate PUT %s: %v\n", path, err)
+		}
+		if err := maybeMake("PATCH", item.Patch); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate PATCH %s: %v\n", path, err)
+		}
+		if err := maybeMake("DELETE", item.Delete); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate DELETE %s: %v\n", path, err)
+		}
+		if err := maybeMake("OPTIONS", item.Options); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate OPTIONS %s: %v\n", path, err)
+		}
+		if err := maybeMake("HEAD", item.Head); err != nil {
+			fmt.Fprintf(os.Stderr, "Warning: failed to generate HEAD %s: %v\n", path, err)
+		}
 	}
 
 	envsExample := `# Example environment configurations
@@ -341,6 +157,213 @@ environments:
 
 	fmt.Printf("Generated collection in %s/\n", outDir)
 	return nil
+}
+
+// extractRequestParameters extracts all parameters from an OpenAPI operation
+func extractRequestParameters(path string, op *openapi3.Operation, doc *openapi3.T) parameterSet {
+	params := parameterSet{
+		pathParams:     extractPathParams(path),
+		queryParams:    []string{},
+		headerParams:   []string{},
+		formDataParams: []string{},
+		bodyVars:       map[string]any{},
+	}
+
+	if op.Parameters == nil {
+		return params
+	}
+
+	for _, paramRef := range op.Parameters {
+		if paramRef.Value == nil {
+			continue
+		}
+
+		switch paramRef.Value.In {
+		case "query":
+			paramName := strings.ToUpper(paramRef.Value.Name)
+			params.queryParams = append(params.queryParams, paramName)
+		case "header":
+			paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
+			params.headerParams = append(params.headerParams, paramName)
+		case "formData":
+			paramName := strings.ToUpper(paramRef.Value.Name)
+			params.formDataParams = append(params.formDataParams, paramName)
+		}
+	}
+
+	return params
+}
+
+// extractRequestBody extracts request body information from an OpenAPI operation
+func extractRequestBody(op *openapi3.Operation, doc *openapi3.T) requestBodyInfo {
+	bodyInfo := requestBodyInfo{
+		bodyVars: make(map[string]any),
+	}
+
+	// OpenAPI 3.0 style (requestBody)
+	if op.RequestBody != nil && op.RequestBody.Value != nil {
+		for ct, mediaType := range op.RequestBody.Value.Content {
+			bodyInfo.contentType = ct
+			if mediaType.Example != nil {
+				bodyInfo.bodyVars = extractBodyVariablesFromAny(mediaType.Example)
+				bodyInfo.exampleBody = formatExampleWithVars(mediaType.Example, bodyInfo.contentType)
+				return bodyInfo
+			} else if len(mediaType.Examples) > 0 {
+				for _, exampleRef := range mediaType.Examples {
+					if exampleRef.Value != nil && exampleRef.Value.Value != nil {
+						bodyInfo.bodyVars = extractBodyVariablesFromAny(exampleRef.Value.Value)
+						bodyInfo.exampleBody = formatExampleWithVars(exampleRef.Value.Value, bodyInfo.contentType)
+						return bodyInfo
+					}
+				}
+				return bodyInfo
+			} else if mediaType.Schema != nil {
+				schemaExample := generateExampleFromSchema(mediaType.Schema.Value, doc)
+				if schemaExample != nil {
+					bodyInfo.bodyVars = extractBodyVariablesFromAny(schemaExample)
+					bodyInfo.exampleBody = formatExampleWithVars(schemaExample, bodyInfo.contentType)
+					return bodyInfo
+				}
+			}
+		}
+	}
+
+	// Swagger 2.0 style (parameters with in: "body")
+	if op.Parameters != nil {
+		for _, paramRef := range op.Parameters {
+			if paramRef.Value != nil && paramRef.Value.In == "body" && paramRef.Value.Schema != nil {
+				bodyInfo.contentType = "application/json"
+				schema := paramRef.Value.Schema.Value
+				schemaExample := generateExampleFromSchema(schema, doc)
+				if schemaExample != nil {
+					bodyInfo.bodyVars = extractBodyVariablesFromAny(schemaExample)
+					bodyInfo.exampleBody = formatExampleWithVars(schemaExample, bodyInfo.contentType)
+					return bodyInfo
+				}
+			}
+		}
+	}
+
+	return bodyInfo
+}
+
+// writeVariableSections writes all variable sections to the curl buffer
+func writeVariableSections(curl *bytes.Buffer, params parameterSet, bodyInfo requestBodyInfo) {
+	if len(params.pathParams) > 0 {
+		fmt.Fprintf(curl, "\n# Path Parameters\n")
+		for _, param := range params.pathParams {
+			fmt.Fprintf(curl, "%s=\"VALUE\"\n", strings.ToUpper(param))
+		}
+	}
+	if len(params.queryParams) > 0 {
+		fmt.Fprintf(curl, "\n# Query Parameters\n")
+		for _, paramName := range params.queryParams {
+			fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
+		}
+	}
+	if len(params.headerParams) > 0 {
+		fmt.Fprintf(curl, "\n# Headers\n")
+		for _, paramName := range params.headerParams {
+			fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
+		}
+	}
+	if len(params.formDataParams) > 0 {
+		fmt.Fprintf(curl, "\n# Form Data\n")
+		for _, paramName := range params.formDataParams {
+			fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
+		}
+	}
+	if len(bodyInfo.bodyVars) > 0 {
+		fmt.Fprintf(curl, "\n# Body\n")
+		keys := make([]string, 0, len(bodyInfo.bodyVars))
+		for k := range bodyInfo.bodyVars {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			fmt.Fprintf(curl, "%s=%s\n", strings.ToUpper(k), formatVariableValue(bodyInfo.bodyVars[k]))
+		}
+	}
+}
+
+// buildCurlCommand builds the curl command string
+
+// buildCurlCommand builds the curl command string
+func buildCurlCommand(curl *bytes.Buffer, method, path string, pathParams []string, op *openapi3.Operation, formDataParams []string, bodyInfo requestBodyInfo) {
+	urlPath := path
+	for _, param := range pathParams {
+		urlPath = strings.ReplaceAll(urlPath, "{"+param+"}", "${"+strings.ToUpper(param)+"}")
+	}
+
+	fmt.Fprintf(curl, "\ncurl -s -X %s \"${BASE_URL}%s", strings.ToUpper(method), urlPath)
+
+	// Add query parameters
+	if op.Parameters != nil {
+		queryStrs := []string{}
+		for _, paramRef := range op.Parameters {
+			if paramRef.Value != nil && paramRef.Value.In == "query" {
+				paramName := strings.ToUpper(paramRef.Value.Name)
+				queryStrs = append(queryStrs, fmt.Sprintf("%s=${%s}", paramRef.Value.Name, paramName))
+			}
+		}
+		if len(queryStrs) > 0 {
+			fmt.Fprintf(curl, "?%s", strings.Join(queryStrs, "&"))
+		}
+	}
+
+	fmt.Fprintf(curl, "\"")
+
+	// Add headers
+	if bodyInfo.contentType != "" {
+		fmt.Fprintf(curl, " \\\n  -H \"Content-Type: %s\"", bodyInfo.contentType)
+	}
+	fmt.Fprintf(curl, " \\\n  -H \"Accept: application/json\"")
+
+	if op.Parameters != nil {
+		for _, paramRef := range op.Parameters {
+			if paramRef.Value != nil && paramRef.Value.In == "header" {
+				paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
+				fmt.Fprintf(curl, " \\\n  -H \"%s: ${%s}\"", paramRef.Value.Name, paramName)
+			}
+		}
+	}
+
+	// Add form data or body
+	if len(formDataParams) > 0 {
+		addFormDataFields(curl, op, formDataParams)
+	} else if bodyInfo.exampleBody != "" {
+		fmt.Fprintf(curl, " \\\n  --data-binary @- << EOF\n%s\nEOF", bodyInfo.exampleBody)
+	} else if op.RequestBody != nil {
+		fmt.Fprintf(curl, " \\\n  -d '{\"foo\": \"bar\"}'")
+	}
+
+	fmt.Fprintf(curl, "\n")
+}
+
+// addFormDataFields adds form data fields to the curl command
+func addFormDataFields(curl *bytes.Buffer, op *openapi3.Operation, formDataParams []string) {
+	for _, paramName := range formDataParams {
+		var originalName string
+		if op.Parameters != nil {
+			for _, paramRef := range op.Parameters {
+				if paramRef.Value != nil && paramRef.Value.In == "formData" {
+					if strings.ToUpper(paramRef.Value.Name) == paramName {
+						originalName = paramRef.Value.Name
+						break
+					}
+				}
+			}
+		}
+
+		if originalName != "" {
+			lowerName := strings.ToLower(originalName)
+			if strings.Contains(lowerName, "file") || strings.Contains(lowerName, "image") || strings.Contains(lowerName, "attachment") {
+				fmt.Fprintf(curl, " \\\n  -F \"%s=@${%s}\"", originalName, paramName)
+			} else {
+				fmt.Fprintf(curl, " \\\n  -F \"%s=${%s}\"", originalName, paramName)
+			}
+		}
+	}
 }
 
 func extractPathParams(path string) []string {

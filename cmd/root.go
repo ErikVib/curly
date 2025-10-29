@@ -152,17 +152,11 @@ func NewRootCmd() *cobra.Command {
 func launchCollection(dir string, envName string, insecure bool) (string, error) {
 	var envVars Environment
 	if envName != "" {
-		envsFile := filepath.Join(dir, "envs.yml")
-		config, err := loadEnvConfig(envsFile)
+		var err error
+		envVars, err = loadEnvironmentVariables(envName, dir)
 		if err != nil {
-			return "", fmt.Errorf("failed to load envs.yml: %w", err)
+			return "", err
 		}
-
-		env, ok := config.Environments[envName]
-		if !ok {
-			return "", fmt.Errorf("environment '%s' not found in envs.yml", envName)
-		}
-		envVars = env
 	}
 
 	matches := []string{}
@@ -236,6 +230,20 @@ func launchCollection(dir string, envName string, insecure bool) (string, error)
 	}
 
 	return cmdText, nil
+}
+
+func loadEnvironmentVariables(envName string, dir string) (Environment, error) {
+	envsFile := filepath.Join(dir, "envs.yml")
+	config, err := loadEnvConfig(envsFile)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load envs.yml: %w", err)
+	}
+
+	env, ok := config.Environments[envName]
+	if !ok {
+		return nil, fmt.Errorf("environment '%s' not found in envs.yml", envName)
+	}
+	return env, nil
 }
 
 func execCmd(cmdText string, times int, parallel int, delay int, verbose bool) error {
@@ -340,7 +348,7 @@ func execCmd(cmdText string, times int, parallel int, delay int, verbose bool) e
 	stats.EndTime = time.Now()
 
 	// Print summary for multiple requests
-	if times > 1 {
+	if times > 1 && verbose {
 		stats.Print()
 	}
 
@@ -366,17 +374,11 @@ func execShellCommand(cmdText string) error {
 func runFile(filePath, dir, envName string, insecure bool) (string, error) {
 	var envVars Environment
 	if envName != "" {
-		envsFile := filepath.Join(dir, "envs.yml")
-		config, err := loadEnvConfig(envsFile)
+		var err error
+		envVars, err = loadEnvironmentVariables(envName, dir)
 		if err != nil {
-			return "", fmt.Errorf("failed to load envs.yml: %w", err)
+			return "", err
 		}
-
-		env, ok := config.Environments[envName]
-		if !ok {
-			return "", fmt.Errorf("environment '%s' not found in envs.yml", envName)
-		}
-		envVars = env
 	}
 
 	content, err := os.ReadFile(filePath)

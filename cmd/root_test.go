@@ -116,33 +116,33 @@ func TestParallelAutoAdjust(t *testing.T) {
 
 func TestBatchCalculation(t *testing.T) {
 	tests := []struct {
-		name           string
-		times          int
-		parallel       int
+		name            string
+		times           int
+		parallel        int
 		expectedBatches int
 	}{
 		{
-			name:           "evenly divisible",
-			times:          100,
-			parallel:       10,
+			name:            "evenly divisible",
+			times:           100,
+			parallel:        10,
 			expectedBatches: 10,
 		},
 		{
-			name:           "remainder",
-			times:          25,
-			parallel:       10,
+			name:            "remainder",
+			times:           25,
+			parallel:        10,
 			expectedBatches: 3,
 		},
 		{
-			name:           "single batch",
-			times:          5,
-			parallel:       10,
+			name:            "single batch",
+			times:           5,
+			parallel:        10,
 			expectedBatches: 1,
 		},
 		{
-			name:           "sequential",
-			times:          10,
-			parallel:       1,
+			name:            "sequential",
+			times:           10,
+			parallel:        1,
 			expectedBatches: 10,
 		},
 	}
@@ -402,8 +402,8 @@ curl -k -s -X GET "${BASE_URL}/test"`,
   -H "Content-Type: application/json"`,
 		},
 		{
-			name: "insecure false does not modify curl",
-			content: `curl -s -X GET "${BASE_URL}/test"`,
+			name:     "insecure false does not modify curl",
+			content:  `curl -s -X GET "${BASE_URL}/test"`,
 			insecure: false,
 			expected: `curl -s -X GET "${BASE_URL}/test"`,
 		},

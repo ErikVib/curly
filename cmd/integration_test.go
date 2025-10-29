@@ -1,4 +1,4 @@
-// +build integration
+//go:build integration
 
 package cmd
 
@@ -112,7 +112,7 @@ func TestConcurrentStatsRecording(t *testing.T) {
 
 	// Simulate concurrent recording
 	done := make(chan bool)
-	
+
 	// Record 500 successes concurrently
 	for i := 0; i < 500; i++ {
 		go func() {
