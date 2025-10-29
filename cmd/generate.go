@@ -15,11 +15,22 @@ import (
 	"github.com/spf13/cobra"
 )
 
+type parameterInfo struct {
+	name         string
+	varName      string
+	description  string
+	paramType    string
+	required     bool
+	defaultValue any
+	enumValues   []any
+	example      any
+}
+
 type parameterSet struct {
-	pathParams     []string
-	queryParams    []string
-	headerParams   []string
-	formDataParams []string
+	pathParams     []*parameterInfo
+	queryParams    []*parameterInfo
+	headerParams   []*parameterInfo
+	formDataParams []*parameterInfo
 	bodyVars       map[string]any
 }
 
@@ -104,7 +115,7 @@ func generateCollection(openapiFile, outDir string) error {
 			if op.Summary != "" {
 				fmt.Fprintf(curl, "# %s\n", op.Summary)
 			}
-			fmt.Fprintf(curl, "\n# Variables\n")
+			fmt.Fprintf(curl, "\n#### Variables ####\n")
 
 			params := extractRequestParameters(path, op, doc)
 			bodyInfo := extractRequestBody(op, doc)
@@ -162,10 +173,10 @@ environments:
 // extractRequestParameters extracts all parameters from an OpenAPI operation
 func extractRequestParameters(path string, op *openapi3.Operation, doc *openapi3.T) parameterSet {
 	params := parameterSet{
-		pathParams:     extractPathParams(path),
-		queryParams:    []string{},
-		headerParams:   []string{},
-		formDataParams: []string{},
+		pathParams:     extractPathParamsInfo(path, op),
+		queryParams:    []*parameterInfo{},
+		headerParams:   []*parameterInfo{},
+		formDataParams: []*parameterInfo{},
 		bodyVars:       map[string]any{},
 	}
 
@@ -178,20 +189,110 @@ func extractRequestParameters(path string, op *openapi3.Operation, doc *openapi3
 			continue
 		}
 
-		switch paramRef.Value.In {
+		param := paramRef.Value
+		info := createParameterInfo(param)
+
+		switch param.In {
 		case "query":
-			paramName := strings.ToUpper(paramRef.Value.Name)
-			params.queryParams = append(params.queryParams, paramName)
+			params.queryParams = append(params.queryParams, info)
 		case "header":
-			paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
-			params.headerParams = append(params.headerParams, paramName)
+			params.headerParams = append(params.headerParams, info)
 		case "formData":
-			paramName := strings.ToUpper(paramRef.Value.Name)
-			params.formDataParams = append(params.formDataParams, paramName)
+			params.formDataParams = append(params.formDataParams, info)
 		}
 	}
 
 	return params
+}
+
+// createParameterInfo creates a parameterInfo struct from an OpenAPI parameter
+func createParameterInfo(param *openapi3.Parameter) *parameterInfo {
+	info := &parameterInfo{
+		name:     param.Name,
+		varName:  strings.ToUpper(strings.ReplaceAll(param.Name, "-", "_")),
+		required: param.Required,
+	}
+
+	if param.Description != "" {
+		info.description = param.Description
+	}
+
+	if param.Schema != nil && param.Schema.Value != nil {
+		schema := param.Schema.Value
+
+		// Get type
+		if schema.Type != nil {
+			info.paramType = schema.Type.Slice()[0]
+		}
+
+		// Get default value
+		if schema.Default != nil {
+			info.defaultValue = schema.Default
+		}
+
+		// Get enum values
+		if len(schema.Enum) > 0 {
+			info.enumValues = schema.Enum
+		}
+
+		// Get example
+		if schema.Example != nil {
+			info.example = schema.Example
+		}
+	}
+
+	// Parameter-level example takes precedence
+	if param.Example != nil {
+		info.example = param.Example
+	}
+
+	return info
+}
+
+// extractPathParamsInfo extracts path parameters with their metadata
+func extractPathParamsInfo(path string, op *openapi3.Operation) []*parameterInfo {
+	paramNames := extractPathParams(path)
+	result := make([]*parameterInfo, 0, len(paramNames))
+
+	for _, name := range paramNames {
+		info := &parameterInfo{
+			name:     name,
+			varName:  strings.ToUpper(name),
+			required: true,
+		}
+
+		// Try to find matching parameter definition
+		if op.Parameters != nil {
+			for _, paramRef := range op.Parameters {
+				if paramRef.Value != nil && paramRef.Value.In == "path" && paramRef.Value.Name == name {
+					param := paramRef.Value
+					if param.Description != "" {
+						info.description = param.Description
+					}
+					if param.Schema != nil && param.Schema.Value != nil {
+						schema := param.Schema.Value
+						if schema.Type != nil {
+							info.paramType = schema.Type.Slice()[0]
+						}
+						if schema.Example != nil {
+							info.example = schema.Example
+						}
+						if len(schema.Enum) > 0 {
+							info.enumValues = schema.Enum
+						}
+					}
+					if param.Example != nil {
+						info.example = param.Example
+					}
+					break
+				}
+			}
+		}
+
+		result = append(result, info)
+	}
+
+	return result
 }
 
 // extractRequestBody extracts request body information from an OpenAPI operation
@@ -250,31 +351,31 @@ func extractRequestBody(op *openapi3.Operation, doc *openapi3.T) requestBodyInfo
 // writeVariableSections writes all variable sections to the curl buffer
 func writeVariableSections(curl *bytes.Buffer, params parameterSet, bodyInfo requestBodyInfo) {
 	if len(params.pathParams) > 0 {
-		fmt.Fprintf(curl, "\n# Path Parameters\n")
+		fmt.Fprintf(curl, "\n#### Path Parameters ####\n")
 		for _, param := range params.pathParams {
-			fmt.Fprintf(curl, "%s=\"VALUE\"\n", strings.ToUpper(param))
+			writeParameterVariable(curl, param)
 		}
 	}
 	if len(params.queryParams) > 0 {
-		fmt.Fprintf(curl, "\n# Query Parameters\n")
-		for _, paramName := range params.queryParams {
-			fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
+		fmt.Fprintf(curl, "\n#### Query Parameters ####\n")
+		for _, param := range params.queryParams {
+			writeParameterVariable(curl, param)
 		}
 	}
 	if len(params.headerParams) > 0 {
-		fmt.Fprintf(curl, "\n# Headers\n")
-		for _, paramName := range params.headerParams {
-			fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
+		fmt.Fprintf(curl, "\n#### Headers ####\n")
+		for _, param := range params.headerParams {
+			writeParameterVariable(curl, param)
 		}
 	}
 	if len(params.formDataParams) > 0 {
-		fmt.Fprintf(curl, "\n# Form Data\n")
-		for _, paramName := range params.formDataParams {
-			fmt.Fprintf(curl, "%s=\"VALUE\"\n", paramName)
+		fmt.Fprintf(curl, "\n#### Form Data ####\n")
+		for _, param := range params.formDataParams {
+			writeParameterVariable(curl, param)
 		}
 	}
 	if len(bodyInfo.bodyVars) > 0 {
-		fmt.Fprintf(curl, "\n# Body\n")
+		fmt.Fprintf(curl, "\n#### Body ####\n")
 		keys := make([]string, 0, len(bodyInfo.bodyVars))
 		for k := range bodyInfo.bodyVars {
 			keys = append(keys, k)
@@ -286,13 +387,77 @@ func writeVariableSections(curl *bytes.Buffer, params parameterSet, bodyInfo req
 	}
 }
 
-// buildCurlCommand builds the curl command string
+// writeParameterVariable writes a parameter variable with helpful comments
+func writeParameterVariable(curl *bytes.Buffer, param *parameterInfo) {
+	// Build description line
+	var descParts []string
+
+	if param.description != "" {
+		descParts = append(descParts, param.description)
+	}
+
+	// Add type information
+	if param.paramType != "" {
+		typeInfo := fmt.Sprintf("type: %s", param.paramType)
+		if param.required {
+			typeInfo += ", required"
+		} else {
+			typeInfo += ", optional"
+		}
+		descParts = append(descParts, typeInfo)
+	}
+
+	// Write description comment if we have one
+	if len(descParts) > 0 {
+		fmt.Fprintf(curl, "# %s\n", strings.Join(descParts, " - "))
+	}
+
+	// Add enum values as a hint
+	if len(param.enumValues) > 0 {
+		fmt.Fprintf(curl, "# Valid values: %v\n", param.enumValues)
+	}
+
+	// Determine the value to use
+	value := determineParameterValue(param)
+
+	fmt.Fprintf(curl, "%s=\"%s\"\n", param.varName, value)
+}
+
+// determineParameterValue determines the best value to use for a parameter
+func determineParameterValue(param *parameterInfo) string {
+	// Priority: example > default > enum[0] > type-based default
+	if param.example != nil {
+		return fmt.Sprintf("%v", param.example)
+	}
+
+	if param.defaultValue != nil {
+		return fmt.Sprintf("%v", param.defaultValue)
+	}
+
+	if len(param.enumValues) > 0 {
+		return fmt.Sprintf("%v", param.enumValues[0])
+	}
+
+	// Type-based defaults
+	switch param.paramType {
+	case "integer":
+		return "0"
+	case "number":
+		return "0.0"
+	case "boolean":
+		return "false"
+	case "string":
+		return "VALUE"
+	default:
+		return "VALUE"
+	}
+}
 
 // buildCurlCommand builds the curl command string
-func buildCurlCommand(curl *bytes.Buffer, method, path string, pathParams []string, op *openapi3.Operation, formDataParams []string, bodyInfo requestBodyInfo) {
+func buildCurlCommand(curl *bytes.Buffer, method, path string, pathParams []*parameterInfo, op *openapi3.Operation, formDataParams []*parameterInfo, bodyInfo requestBodyInfo) {
 	urlPath := path
 	for _, param := range pathParams {
-		urlPath = strings.ReplaceAll(urlPath, "{"+param+"}", "${"+strings.ToUpper(param)+"}")
+		urlPath = strings.ReplaceAll(urlPath, "{"+param.name+"}", "${"+param.varName+"}")
 	}
 
 	fmt.Fprintf(curl, "\ncurl -s -X %s \"${BASE_URL}%s", strings.ToUpper(method), urlPath)
@@ -302,7 +467,7 @@ func buildCurlCommand(curl *bytes.Buffer, method, path string, pathParams []stri
 		queryStrs := []string{}
 		for _, paramRef := range op.Parameters {
 			if paramRef.Value != nil && paramRef.Value.In == "query" {
-				paramName := strings.ToUpper(paramRef.Value.Name)
+				paramName := strings.ToUpper(strings.ReplaceAll(paramRef.Value.Name, "-", "_"))
 				queryStrs = append(queryStrs, fmt.Sprintf("%s=${%s}", paramRef.Value.Name, paramName))
 			}
 		}
@@ -330,7 +495,7 @@ func buildCurlCommand(curl *bytes.Buffer, method, path string, pathParams []stri
 
 	// Add form data or body
 	if len(formDataParams) > 0 {
-		addFormDataFields(curl, op, formDataParams)
+		addFormDataFields(curl, formDataParams)
 	} else if bodyInfo.exampleBody != "" {
 		fmt.Fprintf(curl, " \\\n  --data-binary @- << EOF\n%s\nEOF", bodyInfo.exampleBody)
 	} else if op.RequestBody != nil {
@@ -341,27 +506,13 @@ func buildCurlCommand(curl *bytes.Buffer, method, path string, pathParams []stri
 }
 
 // addFormDataFields adds form data fields to the curl command
-func addFormDataFields(curl *bytes.Buffer, op *openapi3.Operation, formDataParams []string) {
-	for _, paramName := range formDataParams {
-		var originalName string
-		if op.Parameters != nil {
-			for _, paramRef := range op.Parameters {
-				if paramRef.Value != nil && paramRef.Value.In == "formData" {
-					if strings.ToUpper(paramRef.Value.Name) == paramName {
-						originalName = paramRef.Value.Name
-						break
-					}
-				}
-			}
-		}
-
-		if originalName != "" {
-			lowerName := strings.ToLower(originalName)
-			if strings.Contains(lowerName, "file") || strings.Contains(lowerName, "image") || strings.Contains(lowerName, "attachment") {
-				fmt.Fprintf(curl, " \\\n  -F \"%s=@${%s}\"", originalName, paramName)
-			} else {
-				fmt.Fprintf(curl, " \\\n  -F \"%s=${%s}\"", originalName, paramName)
-			}
+func addFormDataFields(curl *bytes.Buffer, formDataParams []*parameterInfo) {
+	for _, param := range formDataParams {
+		lowerName := strings.ToLower(param.name)
+		if strings.Contains(lowerName, "file") || strings.Contains(lowerName, "image") || strings.Contains(lowerName, "attachment") {
+			fmt.Fprintf(curl, " \\\n  -F \"%s=@${%s}\"", param.name, param.varName)
+		} else {
+			fmt.Fprintf(curl, " \\\n  -F \"%s=${%s}\"", param.name, param.varName)
 		}
 	}
 }
